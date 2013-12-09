@@ -21,7 +21,11 @@ let build_comm_cond procs s t =
 try
   let file_name = ref "" in
   let processors = ref 1 in
-  let speclist = Arg.align [("-processors", Arg.Set_int processors, " # of processors")] in
+  let model = ref false in
+  let speclist = Arg.align [
+		     ("-processors", Arg.Set_int processors, " # of processors");
+		     ("-get-alloc", Arg.Set model, " get allocation for the makespan result")
+		   ] in
   let () = Arg.parse speclist (fun x -> file_name := x) usage_msg in
   let pp = G.make () in
   let () = if !file_name = "" then raise (File_Not_found !file_name) else () in
@@ -88,8 +92,22 @@ try
 	
   (* The final output to the SMT-LIB FORMAT *)
   let top = "(set-option :produce-proofs true)\n(set-logic QF_LRA)\n" |> text in
-  let bot = "(check-sat)\n(get-model)\n(get-proof)\n" |> text in
-  let tot = append ea_doc bot |> append dnpca_doc |> append dnpc_doc |> append declared_node_doc |> append top in
+  (* The 2 hacks below should be changed -- because they assume that there is a single start node with id 0 and a single sink node with id = No of Nodes - 1 *)
+  let hack1 = "(assert (>= Node0 0))\n(declare-fun M () Real)\n" |> text in
+  let en = string_of_int (((match (L.flatten graph_attrs |> L.map (fun x -> if GXL.get_attr_name x = "No of nodes" then Some (GXL.get_attr_value x) else None) 
+				   |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with 
+			    | Some x -> x | _ -> failwith "fuck!!") |> GXL.string_of_gxl_value |> int_of_string)-1) in
+  let seqt = GXL.string_of_gxl_value
+    (match (L.flatten graph_attrs |> L.map (fun x -> if GXL.get_attr_name x = "Total sequential time" then Some (GXL.get_attr_value x) else None) 
+		    |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with | Some x -> x | _ -> failwith "fuck!!") in
+  let hack2 = "(assert (>= M (+ Node" ^en^" "^(H.find weighttbl en |> L.hd)^")))\n" |> text in
+  let mb = "(assert (<= M "^seqt^"))\n" |> text in
+  let bot = 
+    if !model = false then
+      "(check-sat)\n(get-value (M))\n" |> text
+  else
+      "(check-sat)\n(get-value (M))\n(get-model)\n" |> text in
+  let tot = append ea_doc bot |> append dnpca_doc |> append mb |> append hack2 |> append hack1 |> append dnpc_doc |> append declared_node_doc |> append top in
   print tot
   
 with

@@ -6,7 +6,7 @@ SEXPLIB=`ocamlfind query sexplib`
 gxl2smt:
 	ocamlfind $(CC) -pp "camlp4o -I $(TYPECONV) -I $(SEXPLIB)	\
 	pa_type_conv.cma pa_sexp_conv.cma pa_macro.cmo -UDEBUG		\
-	-DTDEBUG" -o $@ -linkpkg -package batteries -package sexplib	\
+	-UTDEBUG" -o $@ -linkpkg -package batteries -package sexplib	\
 	-package xml-light -package ocaml-gxl-light -package pretty	\
 	$(SRC)
 

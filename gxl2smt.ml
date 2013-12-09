@@ -1,5 +1,6 @@
 module L = Batteries.List
-module A = Batteries.Array
+module LL = Batteries.LazyList
+module E = Batteries.Enum
 module H = Batteries.Hashtbl
 module SS = Sexplib.Sexp
 module SSL = Sexplib.Std
@@ -15,7 +16,7 @@ let weighttbl = H.create 60 in
 let usage_msg = "Usage: parse <filename>\nsee -help for more options" in
 
 let build_comm_cond procs s t = 
-  
+  LL.init procs (fun x -> LL.init procs (fun y -> if x <> y then "(and Node"^s^"P"^(string_of_int y) ^ " Node"^t^"P"^(string_of_int x)^")" else "")) |> LL.concat in
 
 try
   let file_name = ref "" in
@@ -27,11 +28,13 @@ try
   let () = G.parse !file_name pp in
   let gxl_element = G.get_document_element pp in
   let graphs = GXL.get_gxl_gxl_graph_list gxl_element in
-  let () = print_endline "Info about the graph!!\nGraph names:" in
-  let () = L.iter (fun x -> print_endline (GXL.get_typed_element_id x)) graphs in
+  let () = IFDEF DEBUG THEN print_endline "Info about the graph!!\nGraph names:" ELSE () ENDIF in
+  let () = IFDEF DEBUG THEN L.iter (fun x -> print_endline (GXL.get_typed_element_id x)) graphs ELSE () ENDIF in
   let graph_attrs = L.map GXL.get_typed_element_attr_list graphs in
-  let () = print_endline "Graph attributes :" in
-  let () = L.iter (fun x -> L.iter (fun y -> print_endline ((GXL.get_attr_name y) ^ " = " ^ (GXL.get_attr_value y |> GXL.string_of_gxl_value))) x) graph_attrs in
+  let () = IFDEF DEBUG THEN print_endline "Graph attributes :" ELSE () ENDIF in
+  let () = IFDEF DEBUG THEN 
+    L.iter (fun x -> L.iter (fun y -> print_endline ((GXL.get_attr_name y) ^ " = " ^ (GXL.get_attr_value y |> GXL.string_of_gxl_value))) x) graph_attrs 
+    ELSE () ENDIF in
   let graph_elements = L.map GXL.get_graph_element_list graphs in
 
 
@@ -58,7 +61,7 @@ try
   let node_weights = L.map (fun y -> L.map (fun x -> GXL.get_attr_value x |> GXL.string_of_gxl_value) y) node_weights in
   let ograph_nodes = L.map (fun x -> L.map (fun y -> (GXL.get_graph_element_id y)) x) graph_nodes_el |> L.flatten in
   let () = L.iter2 (fun x y -> H.add weighttbl x y) ograph_nodes node_weights in
-  let () = IFDEF TDEBUG THEN H.iter (fun x y -> (x ^ "--" ^ (L.fold_left (fun t u -> t ^ " " ^ u) "" y) ) |> print_endline) weighttbl ELSE () ENDIF in
+  let () = IFDEF DEBUG THEN H.iter (fun x y -> (x ^ "--" ^ (L.fold_left (fun t u -> t ^ " " ^ u) "" y) ) |> print_endline) weighttbl ELSE () ENDIF in
 
   (* These are the graph edges *)
   let graph_edges = L.map (fun x -> L.filter (function | GXL.GXLLocalConnection _ -> true | _ -> false) x) graph_elements in
@@ -71,13 +74,24 @@ try
 				       let v = GXL.get_edge_source x |> GXL.get_graph_element_id |> H.find weighttbl |> L.hd in 
 				       let s = GXL.get_edge_source x |> GXL.get_graph_element_id in
 				       let t = GXL.get_edge_target x |> GXL.get_graph_element_id in
+				       let orew = 
+					 if !processors > 1 then
+					   "(ite (or " ^ (LL.fold_left (fun t x -> x ^ " " ^ t) "" (build_comm_cond !processors s t)) ^ ") " ^ ew ^ " 0)"
+				       else "0" in
 				       (* This needs to be changed for communication *)
-				       "(assert (>= Node" ^ t ^ " (+ Node" ^ s ^ " " ^ v ^ ")))\n" |> text)) in
+				       "(assert (>= Node" ^ t ^ " (+(+ Node" ^ s ^ " " ^ v ^ ")"^orew^")))\n" |> text)) in
   let () = IFDEF TDEBUG THEN print ea_doc ELSE () ENDIF in
   let () = IFDEF DEBUG THEN print_endline "Connections: " ELSE () ENDIF in
-  IFDEF DEBUG THEN
-	L.iter (fun y -> L.iter (fun z -> (GXL.get_edge_source z |> GXL.get_graph_element_id) ^ " ---> " 
-					  ^ (GXL.get_edge_target z |> GXL.get_graph_element_id) |> print_endline) y) graph_edges ELSE () ENDIF 
+  let () = 
+    IFDEF DEBUG THEN L.iter (fun y -> L.iter (fun z -> (GXL.get_edge_source z |> GXL.get_graph_element_id) ^ " ---> " 
+					  ^ (GXL.get_edge_target z |> GXL.get_graph_element_id) |> print_endline) y) graph_edges ELSE () ENDIF  in
+	
+  (* The final output to the SMT-LIB FORMAT *)
+  let top = "(set-option :produce-proofs true)\n(set-logic QF_LRA)\n" |> text in
+  let bot = "(check-sat)\n(get-model)\n(get-proof)\n" |> text in
+  let tot = append ea_doc bot |> append dnpca_doc |> append dnpc_doc |> append declared_node_doc |> append top in
+  print tot
+  
 with
 | End_of_file -> exit 0
 | Sys_error  _ 

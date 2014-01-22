@@ -14,11 +14,19 @@ exception Internal_error
 
 let (|>) x f = f x in
 let weighttbl = H.create 60 in
-let usage_msg = "Usage: parse <filename>\nsee -help for more options" in
+let usage_msg = "Usage: gxl2smt <filename>\nsee -help for more options" in
 
 let build_comm_cond procs s t = 
   LL.init procs (fun x -> LL.init procs (fun y -> if x <> y then "(and Node"^s^"P"^(string_of_int y) ^ " Node"^t^"P"^(string_of_int x)^")" else "")) |> LL.concat in
 
+
+let rec print_results = function
+  | h::t -> (function | SS.Atom x -> print_endline x | SS.List y -> print_results y) h; print_results t
+  | [] -> () in
+
+let parse_result file = 
+  let results = SS.load_sexps file in
+  let () = IFDEF DEBUG THEN print_results results ELSE () ENDIF in () in
 
 let output_graph name graph_attrs = 
   (* These are the nodes from the allocation *)
@@ -41,9 +49,11 @@ try
   let processors = ref 1 in
   let model = ref false in
   let output = ref "" in
+  let result_file = ref "" in
   let speclist = Arg.align [
 		     ("-processors", Arg.Set_int processors, " # of processors");
 		     ("-o", Arg.Set_string output, " the name of the output gxl file, nothing generated if not given");
+		     ("-i", Arg.Set_string result_file, " the name of the solution file generated from SMT solver");
 		     ("-getalloc", Arg.Set model, " get allocation for the makespan result")
 		   ] in
   let () = Arg.parse speclist (fun x -> file_name := x) usage_msg in
@@ -123,6 +133,10 @@ try
   let tot = append ea_doc bot |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
 	    |> append dnpc_doc |> append declared_node_doc |> append top in
   let () = print tot in
+
+  (* This is parsing the answer for further improvement or giving it out *)
+  let () = IFDEF DEBUG THEN print_endline !result_file ELSE () ENDIF in
+  let () = if !result_file <> "" then parse_result !result_file in
   
   (* This is the parsing of the output and generation of the output graph *)
   if !output <> "" then

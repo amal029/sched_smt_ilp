@@ -14,4 +14,4 @@ gxl2smt:
 clean:
 	rm -rf *.ll *.lle *.bc *.s *.dot *.grf *.part* gmon.out TAGS	\
 	*.mli *.cm* *.o systemjc *.xml *.annot *_spi* *_ver*		\
-	*.pml.trail gxl2smt *.gxl
+	*.pml.trail gxl2smt *.gxl *.result

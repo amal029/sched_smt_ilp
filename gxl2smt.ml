@@ -1,4 +1,5 @@
 module L = Batteries.List
+module StringSet = Batteries.Set
 module LL = Batteries.LazyList
 module E = Batteries.Enum
 module H = Batteries.Hashtbl
@@ -18,13 +19,32 @@ let usage_msg = "Usage: parse <filename>\nsee -help for more options" in
 let build_comm_cond procs s t = 
   LL.init procs (fun x -> LL.init procs (fun y -> if x <> y then "(and Node"^s^"P"^(string_of_int y) ^ " Node"^t^"P"^(string_of_int x)^")" else "")) |> LL.concat in
 
+
+let output_graph name graph_attrs = 
+  (* These are the nodes from the allocation *)
+  (* let graph_elements =  *)
+  let graph = GXL.gxl_graph_make ~role:None ~edgeids:None ~hypergraph:None ~edgemode:GXL.Directed ~gxl_type:None ~attrs:graph_attrs 
+				 ~elements:[] ~id:name in
+  {GXL.graphs=[graph];GXL.xlink="http://www.w3.org/1999/xlink"} in
+
+let get_graph_init_and_final_nodes graph_nodes graph_edges =
+  let dests = ref [] in
+  let sources = ref [] in
+  let () = L.iter (fun x -> dests := (GXL.get_edge_target x |> GXL.get_graph_element_id) :: !dests) graph_edges in
+  let () = L.iter (fun x -> sources := (GXL.get_edge_source x |> GXL.get_graph_element_id) :: !sources) graph_edges in
+  let inits = StringSet.diff (StringSet.of_list graph_nodes)  (StringSet.of_list !dests) |> StringSet.enum |> L.of_enum in
+  let finals = StringSet.diff (StringSet.of_list graph_nodes) (StringSet.of_list !sources) |> StringSet.enum |> L.of_enum in
+  (inits,finals) in
+
 try
   let file_name = ref "" in
   let processors = ref 1 in
   let model = ref false in
+  let output = ref "" in
   let speclist = Arg.align [
 		     ("-processors", Arg.Set_int processors, " # of processors");
-		     ("-get-alloc", Arg.Set model, " get allocation for the makespan result")
+		     ("-o", Arg.Set_string output, " the name of the output gxl file, nothing generated if not given");
+		     ("-getalloc", Arg.Set model, " get allocation for the makespan result")
 		   ] in
   let () = Arg.parse speclist (fun x -> file_name := x) usage_msg in
   let pp = G.make () in
@@ -79,23 +99,39 @@ try
 	
   (* The final output to the SMT-LIB FORMAT *)
   let top = "(set-option :produce-proofs true)\n(set-logic QF_LRA)\n" |> text in
-  (* The 2 hacks below should be changed -- because they assume that there is a single start node with id 0 and a single sink node with id = No of Nodes - 1 *)
-  let hack1 = "(assert (>= Node0 0))\n(declare-fun M () Real)\n" |> text in
-  let en = string_of_int (((match (L.flatten graph_attrs |> L.map (fun x -> if GXL.get_attr_name x = "No of nodes" then Some (GXL.get_attr_value x) else None) 
-				   |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with 
-			    | Some x -> x | _ -> failwith "fuck!!") |> GXL.string_of_gxl_value |> int_of_string)-1) in
+  let graph_nodes = L.map (fun x -> L.map (fun y -> GXL.get_graph_element_id y) x) graph_nodes_el |> L.flatten in
+  let (inits,finals) = get_graph_init_and_final_nodes graph_nodes (L.flatten graph_edges) in
+  let oinits = L.map (fun x -> "Node"^x) inits in 
+  let () = IFDEF TDEBUG THEN L.iter (fun x -> print_endline ("init: " ^ x ^ "\n")) inits ELSE () ENDIF in
+  let () = IFDEF TDEBUG THEN L.iter (fun x -> print_endline ("final: " ^ x ^ "\n")) finals ELSE () ENDIF in
+  let init_inits = L.map (fun x -> "(assert (>= " ^ x ^ " 0))\n" |> text) oinits |> (L.fold_left append empty) in
+  let hack1 = "(declare-fun M () Real)\n" |> text in
+  (* let en = string_of_int (((match (L.flatten graph_attrs |> L.map (fun x -> if GXL.get_attr_name x = "No of nodes" then Some (GXL.get_attr_value x) else None) *)
+  (* 				   |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with *)
+  (* 			    | Some x -> x | _ -> failwith "fuck!!") |> GXL.string_of_gxl_value |> int_of_string)-1) in *)
   let seqt = GXL.string_of_gxl_value
     (match (L.flatten graph_attrs |> L.map (fun x -> if GXL.get_attr_name x = "Total sequential time" then Some (GXL.get_attr_value x) else None) 
 		    |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with | Some x -> x | _ -> failwith "fuck!!") in
-  let hack2 = "(assert (>= M (+ Node" ^en^" "^(H.find weighttbl en |> L.hd)^")))\n" |> text in
+  let hack21 = L.map (fun en -> "(>= M (+ Node" ^en^" "^(H.find weighttbl en |> L.hd)^")) " |> text) finals |> (L.fold_left append empty) in
+  let hack2 = append (append ("(assert (and " |> text) hack21) ("))\n" |> text)  in
   let mb = "(assert (<= M "^seqt^"))\n" |> text in
   let bot = 
     if !model = false then
       "(check-sat)\n(get-value (M))\n" |> text
   else
       "(check-sat)\n(get-value (M))\n(get-model)\n" |> text in
-  let tot = append ea_doc bot |> append dnpca_doc |> append mb |> append hack2 |> append hack1 |> append dnpc_doc |> append declared_node_doc |> append top in
-  print tot
+  let tot = append ea_doc bot |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
+	    |> append dnpc_doc |> append declared_node_doc |> append top in
+  let () = print tot in
+  
+  (* This is the parsing of the output and generation of the output graph *)
+  if !output <> "" then
+    let graph_id = GXL.get_typed_element_id (L.hd graphs) in
+    let processor_attr =  GXL.gxl_attr_make  (GXL.gxl_atomic_value_make (GXL.gxl_int_make !processors)) "Processors" in
+    let ochan = open_out !output in
+    output_string ochan (Xml.to_string_fmt (GXL.gxl_gxl_to_xml (output_graph graph_id ((L.hd graph_attrs) @ [processor_attr]))));
+    flush ochan; (*flush everything down*)
+    close_out ochan
   
 with
 | End_of_file -> exit 0

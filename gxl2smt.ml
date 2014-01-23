@@ -17,7 +17,7 @@ let weighttbl = H.create 60 in
 let usage_msg = "Usage: gxl2smt <filename>\nsee -help for more options" in
 
 let build_comm_cond procs s t = 
-  LL.init procs (fun x -> LL.init procs (fun y -> if x <> y then "(and Node_"^s^"P"^(string_of_int y) ^ " Node_"^t^"P"^(string_of_int x)^")" else "")) |> LL.concat in
+  LL.init procs (fun x -> LL.init procs (fun y -> if x <> y then "(and Node_"^s^"_"^(string_of_int y) ^ " Node_"^t^"_"^(string_of_int x)^")" else "")) |> LL.concat in
 
 
 let output_graph name graph_attrs = 
@@ -64,7 +64,7 @@ try
   (* These are the node and the processor combination booleans *)
   let (dnpca_doc,dnpc_doc) = 
     if !processors > 1 then
-      let node_processor_combo = L.map (fun x -> L.init !processors (fun i -> x ^ "P" ^ (string_of_int i))) graph_nodes in 
+      let node_processor_combo = L.map (fun x -> L.init !processors (fun i -> x ^ "_" ^ (string_of_int i))) graph_nodes in 
       let dnpc_doc = (L.fold_left append empty) (L.map (fun x -> "(declare-fun " ^ x ^ " () Bool)\n") (L.flatten node_processor_combo) |> L.map text) in
       ((L.fold_left append empty) 
 	((L.map (fun x -> "(assert (or " ^ (L.fold_left (fun y z -> z^" "^y) "" x) ^ "))\n") node_processor_combo) |> L.map text),dnpc_doc)

@@ -11,6 +11,7 @@ open Pretty
 
 exception File_Not_found of string
 exception Internal_error
+exception Solver_error of string
 
 let (|>) x f = f x in
 let weighttbl = H.create 60 in
@@ -35,6 +36,11 @@ let get_graph_init_and_final_nodes graph_nodes graph_edges =
   let inits = StringSet.diff (StringSet.of_list graph_nodes)  (StringSet.of_list !dests) |> StringSet.enum |> L.of_enum in
   let finals = StringSet.diff (StringSet.of_list graph_nodes) (StringSet.of_list !sources) |> StringSet.enum |> L.of_enum in
   (inits,finals) in
+
+
+(* This is the reachability function *)
+let reachability () = () in
+
 
 try
   let file_name = ref "" in
@@ -97,7 +103,7 @@ try
   let () = IFDEF TDEBUG THEN print ea_doc ELSE () ENDIF in
 	
   (* The final output to the SMT-LIB FORMAT *)
-  let top = "(set-option :produce-proofs true)\n(set-logic QF_LRA)\n" |> text in
+  let top = "(set-logic QF_LRA)\n" |> text in
   let graph_nodes = L.map (fun x -> L.map (fun y -> GXL.get_graph_element_id y) x) graph_nodes_el |> L.flatten in
   let (inits,finals) = get_graph_init_and_final_nodes graph_nodes (L.flatten graph_edges) in
   let oinits = L.map (fun x -> "Node_"^x) inits in 
@@ -114,16 +120,33 @@ try
   let hack21 = L.map (fun en -> "(>= M (+ Node_" ^en^" "^(H.find weighttbl en |> L.hd)^")) " |> text) finals |> (L.fold_left append empty) in
   let hack2 = append (append ("(assert (and " |> text) hack21) ("))\n" |> text)  in
   let mb = "(assert (<= M "^seqt^"))\n" |> text in
-  let bot = 
-    if !model = false then
-      "(check-sat)\n(get-value (M))\n" |> text
-  else
-      "(check-sat)\n(get-value (M))\n(get-model)\n" |> text in
+  let bot = "(check-sat)\n" |> text in
   let tot = append ea_doc bot |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
 	    |> append dnpc_doc |> append declared_node_doc |> append top in
-  print tot
-
-  
+  (* This prints it to screen  *)
+  let () = IFDEF TDEBUG THEN print tot ELSE () ENDIF in
+  let sb = Buffer.create 1000 in
+  let out = Buffer.add_string sb  in
+  let tot = print ~output:out tot in
+  let tot = Buffer.contents sb in
+  let ctx = Z3.mk_context [("MODEL_VALIDATE", "true");("MODEL", "true")] in
+  let ast = Z3.parse_smtlib2_string ctx tot [||] [||] [||] [||] in
+  let () = IFDEF TDEBUG THEN print_endline (Z3.ast_to_string ctx ast) ELSE () ENDIF in 
+  let solver = Z3.mk_solver_for_logic ctx (Z3.mk_string_symbol ctx "QF_LRA") in
+  let () = Z3.solver_assert ctx solver ast in
+  let () = (match Z3.solver_check ctx solver with
+	    | Z3.L_FALSE -> Z3.ast_to_string ctx (Z3.solver_get_proof ctx solver) |> print_endline
+	    | Z3.L_TRUE -> 
+	       let () = IFDEF TDEBUG THEN Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline ELSE () ENDIF in
+	       let mm = Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx) in
+	       let mval = (match Z3.model_get_const_interp ctx (Z3.solver_get_model ctx solver) mm with 
+			   | None -> raise Internal_error 
+			   | Some s -> s) in 
+	       let mval = (Z3.ast_to_string ctx mval) |> float_of_string in
+	       print_endline (string_of_float mval)
+	    | Z3.L_UNDEF -> raise (Solver_error (Z3.solver_get_reason_unknown ctx solver))
+	   ) in
+  Z3.del_context ctx
 with
 | End_of_file -> exit 0
 | Sys_error  _ 

@@ -58,6 +58,10 @@ let reachable gedges a =
   !marked
 in
 
+(* Here gnodes should only be the source nodes in the graph *)
+let reachability gnodes gedges = L.map (function x -> (x,reachable gedges x)) gnodes in
+
+
 try
   let file_name = ref "" in
   let processors = ref 1 in

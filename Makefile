@@ -8,7 +8,7 @@ WHERELIB=`ocamlfind query pa_where`
 Z3LIB=../Z3/src/api/ml/old
 CAMLIDL=../Z3/CAMLIDL/camlidl-1.05/runtime
 
-all: gxl2smt smt2gxl test
+all: gxl2smt smt2gxl
 
 gxl2smt:
 	ocamlfind $(CC) -pp "camlp4o -I $(TYPECONV) -I $(SEXPLIB) -I	\

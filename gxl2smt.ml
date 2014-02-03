@@ -39,8 +39,24 @@ let get_graph_init_and_final_nodes graph_nodes graph_edges =
 
 
 (* This is the reachability function *)
-let reachability () = () in
-
+let reachable gedges a =
+  (* Remove from the pot_noreach list if there exists an edge *)
+  let marked = ref [] in
+  let q = Queue.create () in
+  let () = Queue.add a q in
+  while not (Queue.is_empty q) do
+    let i = Queue.pop q in
+    List.iter (fun x -> 
+	       let s = GXL.get_edge_source x |> GXL.get_graph_element_id in
+	       let t = GXL.get_edge_target x |> GXL.get_graph_element_id in
+	       if s = i then
+		 if not (L.exists (fun y -> t = y) !marked) then 
+		   (marked := t :: !marked; 
+		    Queue.add t q)
+	      ) gedges
+  done;
+  !marked
+in
 
 try
   let file_name = ref "" in
@@ -137,7 +153,7 @@ try
   let () = (match Z3.solver_check ctx solver with
 	    | Z3.L_FALSE -> Z3.ast_to_string ctx (Z3.solver_get_proof ctx solver) |> print_endline
 	    | Z3.L_TRUE -> 
-	       let () = IFDEF TDEBUG THEN Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline ELSE () ENDIF in
+	       let () = if !model then Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline else () in
 	       let mm = Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx) in
 	       let mval = (match Z3.model_get_const_interp ctx (Z3.solver_get_model ctx solver) mm with 
 			   | None -> raise Internal_error 

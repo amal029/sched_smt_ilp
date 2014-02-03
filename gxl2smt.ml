@@ -67,6 +67,39 @@ let reach s t closure =
   let (_,x) = LL.find (function (x,_) -> x = s) closure in
   LL.exists (fun x -> x = t) x in
 
+let sub mval oval ast ctx = 
+  (* First update the Mvalue term with the new argument mval *)
+  let m = Z3.mk_app ctx (Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx)) [||] in
+  let f = [| Z3.mk_le ctx m oval |] in
+  let t = [| Z3.mk_lt ctx m mval |] in
+  let ast = Z3.substitute ctx ast f t in
+  let f = [| Z3.mk_lt ctx m oval |] in
+  let t = [| Z3.mk_lt ctx m mval |] in
+  Z3.substitute ctx ast f t
+in
+
+let rec find_optimal oval solver ctx ast model = 
+  let () = Z3.solver_assert ctx solver ast in
+  match Z3.solver_check ctx solver with
+  | Z3.L_FALSE -> Z3.ast_to_string ctx (Z3.solver_get_proof ctx solver) |> print_endline
+  | Z3.L_TRUE -> 
+     let mm = Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx) in
+     let mval = (match Z3.model_get_const_interp ctx (Z3.solver_get_model ctx solver) mm with 
+		 | None -> raise (Solver_error "Could not find M's value in solver!") 
+		 | Some s -> s) in 
+     let mv = Z3.ast_to_string ctx mval in
+     let ov = Z3.ast_to_string ctx oval in
+     let () = IFDEF TDEBUG THEN print_endline (mv ^ " " ^ ov) ELSE () ENDIF in
+     if mv < ov then
+       (* Update ast and call this thing again *)
+       let ast = sub mval oval ast ctx in
+       find_optimal mval solver ctx ast model
+     else 
+       let () = if model then Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline else () in
+       print_endline ("OPTIMAL M: " ^ mv)
+  | Z3.L_UNDEF -> 
+     raise (Solver_error (Z3.solver_get_reason_unknown ctx solver))
+in
 
 try
   let file_name = ref "" in
@@ -172,15 +205,12 @@ try
   let () = IFDEF TDEBUG THEN L.iter (fun x -> print_endline ("final: " ^ x ^ "\n")) finals ELSE () ENDIF in
   let init_inits = L.map (fun x -> "(assert (>= " ^ x ^ " 0))\n" |> text) oinits |> (L.fold_left append empty) in
   let hack1 = "(declare-fun M () Real)\n" |> text in
-  (* let en = string_of_int (((match (L.flatten graph_attrs |> L.map (fun x -> if GXL.get_attr_name x = "No of nodes" then Some (GXL.get_attr_value x) else None) *)
-  (* 				   |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with *)
-  (* 			    | Some x -> x | _ -> failwith "fuck!!") |> GXL.string_of_gxl_value |> int_of_string)-1) in *)
   let seqt = GXL.string_of_gxl_value
     (match (L.flatten graph_attrs |> L.map (fun x -> if GXL.get_attr_name x = "Total sequential time" then Some (GXL.get_attr_value x) else None) 
-		    |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with | Some x -> x | _ -> failwith "fuck!!") in
+		    |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with | Some x -> x | _ -> raise Internal_error) in
   let hack21 = L.map (fun en -> "(>= M (+ Node_" ^en^" "^(H.find weighttbl en |> L.hd)^")) " |> text) finals |> (L.fold_left append empty) in
   let hack2 = append (append ("(assert (and " |> text) hack21) ("))\n" |> text)  in
-  let mb = "(assert (<= M "^seqt^"))\n" |> text in
+  let mb = "(assert (< M "^seqt^"))\n" |> text in
   let tot = append ea_doc o_doc |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
 	    |> append dnpc_doc |> append declared_node_doc |> append top in
   (* This prints it to screen  *)
@@ -193,19 +223,7 @@ try
   let ast = Z3.parse_smtlib2_string ctx tot [||] [||] [||] [||] in
   let () = IFDEF TDEBUG THEN print_endline (Z3.ast_to_string ctx ast) ELSE () ENDIF in 
   let solver = Z3.mk_solver_for_logic ctx (Z3.mk_string_symbol ctx "QF_LRA") in
-  let () = Z3.solver_assert ctx solver ast in
-  let () = (match Z3.solver_check ctx solver with
-	    | Z3.L_FALSE -> Z3.ast_to_string ctx (Z3.solver_get_proof ctx solver) |> print_endline
-	    | Z3.L_TRUE -> 
-	       let () = if !model then Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline else () in
-	       let mm = Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx) in
-	       let mval = (match Z3.model_get_const_interp ctx (Z3.solver_get_model ctx solver) mm with 
-			   | None -> raise Internal_error 
-			   | Some s -> s) in 
-	       let mval = (Z3.ast_to_string ctx mval) |> float_of_string in
-	       print_endline (string_of_float mval)
-	    | Z3.L_UNDEF -> raise (Solver_error (Z3.solver_get_reason_unknown ctx solver))
-	   ) in
+  let () = find_optimal (Z3.mk_numeral ctx seqt (Z3.mk_real_sort ctx)) solver ctx ast !model in
   Z3.del_context ctx
 with
 | End_of_file -> exit 0

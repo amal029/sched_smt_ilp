@@ -20,6 +20,8 @@ let usage_msg = "Usage: gxl2smt <filename>\nsee -help for more options" in
 let build_comm_cond procs s t = 
   LL.init procs (fun x -> LL.init procs (fun y -> if x <> y then "(and Node_"^s^"_"^(string_of_int y) ^ " Node_"^t^"_"^(string_of_int x)^")" else "")) |> LL.concat in
 
+let build_order_cond procs s t =
+  LL.init procs (fun x -> LL.init procs (fun y -> if x = y then "(and Node_"^s^"_"^(string_of_int y) ^ " Node_"^t^"_"^(string_of_int x)^")" else "")) |> LL.concat in
 
 let output_graph name graph_attrs = 
   (* These are the nodes from the allocation *)
@@ -41,17 +43,17 @@ let get_graph_init_and_final_nodes graph_nodes graph_edges =
 (* This is the reachability function *)
 let reachable gedges a =
   (* Remove from the pot_noreach list if there exists an edge *)
-  let marked = ref [] in
+  let marked = ref LL.nil in
   let q = Queue.create () in
   let () = Queue.add a q in
   while not (Queue.is_empty q) do
     let i = Queue.pop q in
-    List.iter (fun x -> 
+    LL.iter (fun x -> 
 	       let s = GXL.get_edge_source x |> GXL.get_graph_element_id in
 	       let t = GXL.get_edge_target x |> GXL.get_graph_element_id in
 	       if s = i then
-		 if not (L.exists (fun y -> t = y) !marked) then 
-		   (marked := t :: !marked; 
+		 if not (LL.exists (fun y -> t = y) !marked) then 
+		   (marked := LL.cons t !marked; 
 		    Queue.add t q)
 	      ) gedges
   done;
@@ -59,7 +61,11 @@ let reachable gedges a =
 in
 
 (* Here gnodes should only be the source nodes in the graph *)
-let reachability gnodes gedges = L.map (function x -> (x,reachable gedges x)) gnodes in
+let reachability gnodes gedges = LL.map (function x -> (x,reachable gedges x)) gnodes in
+
+let reach s t closure = 
+  let (_,x) = LL.find (function (x,_) -> x = s) closure in
+  LL.exists (fun x -> x = t) x in
 
 
 try
@@ -121,7 +127,42 @@ try
 				       (* This needs to be changed for communication *)
 				       "(assert (>= Node_" ^ t ^ " (+(+ Node_" ^ s ^ " " ^ v ^ ")"^orew^")))\n" |> text)) in
   let () = IFDEF TDEBUG THEN print ea_doc ELSE () ENDIF in
-	
+
+  (* Make the transtitive clousure *)
+  let tclosure = reachability (LL.of_list ograph_nodes) (LL.of_list (L.flatten graph_edges)) in
+  (* The ordering constraints *)
+  let donee = ref LL.nil in
+  let o_doc = 
+    L.map (fun s -> 
+	   L.map  (fun t -> 
+		   if s <> t then
+		     if not (reach s t tclosure || reach t s tclosure) then
+		       if not (LL.exists (fun x -> x = (s,t) || x = (t,s)) !donee) then
+			 begin
+			 donee := LL.cons (s,t) !donee;
+			 donee := LL.cons (t,s) !donee;
+			 let v = H.find weighttbl t |> L.hd in 
+			 let sv = H.find weighttbl s |> L.hd in 
+			 let orew = 
+			   if !processors > 1 then
+			     "(ite (or " ^ (LL.fold_left (fun t x -> x ^ " " ^ t) "" (build_order_cond !processors s t)) ^ ") " 
+			     ^  "(+ Node_" ^t^" " ^v^")" ^ " 0)"
+			   else "(+ Node_" ^t^" " ^v^")" in
+			 let rr = 
+			   if !processors > 1 then
+			     "(ite (or " ^ (LL.fold_left (fun t x -> x ^ " " ^ t) "" (build_order_cond !processors s t)) ^ ") " 
+			     ^  "(+ Node_" ^s^" " ^sv^")" ^ " 0)"
+			   else "(+ Node_" ^s^" " ^sv^")" in
+			 "(assert (or (>= Node_" ^ s ^ orew ^ ")(>= Node_"^t^ " " ^rr^")))\n" |> text 
+			 end
+		       else empty
+		     else empty
+		   else empty
+		  ) ograph_nodes
+	  ) ograph_nodes 
+    |> L.flatten |> L.fold_left append empty in
+  
+  let () = IFDEF TDEBUG THEN print o_doc ELSE () ENDIF in
   (* The final output to the SMT-LIB FORMAT *)
   let top = "(set-logic QF_LRA)\n" |> text in
   let graph_nodes = L.map (fun x -> L.map (fun y -> GXL.get_graph_element_id y) x) graph_nodes_el |> L.flatten in
@@ -140,8 +181,7 @@ try
   let hack21 = L.map (fun en -> "(>= M (+ Node_" ^en^" "^(H.find weighttbl en |> L.hd)^")) " |> text) finals |> (L.fold_left append empty) in
   let hack2 = append (append ("(assert (and " |> text) hack21) ("))\n" |> text)  in
   let mb = "(assert (<= M "^seqt^"))\n" |> text in
-  let bot = "(check-sat)\n" |> text in
-  let tot = append ea_doc bot |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
+  let tot = append ea_doc o_doc |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
 	    |> append dnpc_doc |> append declared_node_doc |> append top in
   (* This prints it to screen  *)
   let () = IFDEF TDEBUG THEN print tot ELSE () ENDIF in

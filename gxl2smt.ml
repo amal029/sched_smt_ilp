@@ -108,7 +108,7 @@ let rec find_optimal debug red oval solver ctx ast model mmodel =
 	 find_optimal debug red nval solver ctx ast model (Z3.model_to_string ctx (Z3.solver_get_model ctx solver))
        else
 	 let () = if model then Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline else () in
-	 print_endline ("OPTIMAL M: " ^ (string_of_float mv))
+	 print_endline ("Optimal M with reduce: " ^ (string_of_float mv) ^ "," ^ (string_of_float red))
     | Z3.L_UNDEF -> 
        raise (Solver_error (Z3.solver_get_reason_unknown ctx solver))
   with
@@ -123,7 +123,7 @@ let rec find_optimal debug red oval solver ctx ast model mmodel =
   | Z3.Error(_,Z3.INTERNAL_FATAL) -> print_endline "INTERNAL_FATAL"
   | Z3.Error(_,Z3.INVALID_USAGE) -> 
      let () = if model then mmodel |> print_endline else () in
-     print_endline ("OPTIMAL M: " ^ (string_of_float ((get_values (Z3.ast_to_string ctx oval))+.red)))
+     print_endline ("Optimal M with reduce: " ^ (string_of_float ((get_values (Z3.ast_to_string ctx oval))+.red)) ^ "," ^ (string_of_float red))
   | Z3.Error(_,Z3.DEC_REF_ERROR) -> print_endline "DEC_REF_ERROR"
 in
 
@@ -132,12 +132,14 @@ try
   let processors = ref 1 in
   let model = ref false in
   let output = ref "" in
+  let timeout = ref 0 in
   let red = ref 1.0 in
   let debug = ref false in
   let speclist = Arg.align [
 		     ("-processors", Arg.Set_int processors, " # of processors");
 		     ("-reduce-by", Arg.Set_float red, " the # to for optimal value relaxation");
 		     ("-debug", Arg.Set debug, " display the reduction in the optimal solution");
+		     ("-timeout", Arg.Set_int timeout, " timeout in unsigned integer (ms) [default: 0]");
 		     ("-get-alloc", Arg.Set model, " get allocation for the makespan result")
 		   ] in
   let () = Arg.parse speclist (fun x -> file_name := x) usage_msg in
@@ -255,6 +257,17 @@ try
   let ast = Z3.parse_smtlib2_string ctx tot [||] [||] [||] [||] in
   let () = IFDEF TDEBUG THEN print_endline (Z3.ast_to_string ctx ast) ELSE () ENDIF in 
   let solver = Z3.mk_solver_for_logic ctx (Z3.mk_string_symbol ctx "QF_LRA") in
+  (* Set parameters *)
+  let params = Z3.mk_params ctx in
+  (* Add the timeout parameter *)
+  let () = Z3.params_set_uint ctx params (Z3.mk_string_symbol ctx "soft_timeout") !timeout in
+  let () = Z3.params_set_uint ctx params (Z3.mk_string_symbol ctx "ignore_solver1") 1 in
+  let () = Z3.params_set_uint ctx params (Z3.mk_string_symbol ctx "timeout") !timeout in
+  (* The floyd warshall solver *)
+  (* let () = Z3.solver_get_help ctx solver |> print_endline in *)
+  let () = Z3.params_set_uint ctx params (Z3.mk_string_symbol ctx "arith.solver") 3 in
+  let () = Z3.params_set_uint ctx params (Z3.mk_string_symbol ctx "arith.random_initial_value") 1 in
+  let () = Z3.solver_set_params ctx solver params in
   let () = find_optimal !debug !red (Z3.mk_numeral ctx seqt (Z3.mk_real_sort ctx)) solver ctx ast !model "" in
   Z3.del_context ctx
 with

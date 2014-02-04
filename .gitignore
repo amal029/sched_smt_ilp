@@ -10,3 +10,4 @@
 *.smt2
 gxl2smt
 test.ml
+smt2gxl

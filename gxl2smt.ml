@@ -78,27 +78,53 @@ let sub mval oval ast ctx =
   Z3.substitute ctx ast f t
 in
 
-let rec find_optimal oval solver ctx ast model = 
-  let () = Z3.solver_assert ctx solver ast in
-  match Z3.solver_check ctx solver with
-  | Z3.L_FALSE -> Z3.ast_to_string ctx (Z3.solver_get_proof ctx solver) |> print_endline
-  | Z3.L_TRUE -> 
-     let mm = Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx) in
-     let mval = (match Z3.model_get_const_interp ctx (Z3.solver_get_model ctx solver) mm with 
-		 | None -> raise (Solver_error "Could not find M's value in solver!") 
-		 | Some s -> s) in 
-     let mv = Z3.ast_to_string ctx mval in
-     let ov = Z3.ast_to_string ctx oval in
-     let () = IFDEF TDEBUG THEN print_endline (mv ^ " " ^ ov) ELSE () ENDIF in
-     if mv < ov then
-       (* Update ast and call this thing again *)
-       let ast = sub mval oval ast ctx in
-       find_optimal mval solver ctx ast model
-     else 
-       let () = if model then Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline else () in
-       print_endline ("OPTIMAL M: " ^ mv)
-  | Z3.L_UNDEF -> 
-     raise (Solver_error (Z3.solver_get_reason_unknown ctx solver))
+let get_values mv = 
+  if (Str.string_match (Str.regexp "^(") mv 0) then
+    let tt = Str.split (Str.regexp " ") mv in
+    (float_of_string (L.nth tt 1)) /. (float_of_string (L.nth (Str.split (Str.regexp ")") (L.nth tt 2)) 0)) 
+  else (float_of_string mv)
+in
+
+let rec find_optimal oval solver ctx ast model mmodel = 
+  try
+    let () = Z3.solver_assert ctx solver ast in
+    match Z3.solver_check ctx solver with
+    | Z3.L_FALSE -> Z3.ast_to_string ctx (Z3.solver_get_proof ctx solver) |> print_endline
+    | Z3.L_TRUE -> 
+       let mm = Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx) in
+       let mval = (match Z3.model_get_const_interp ctx (Z3.solver_get_model ctx solver) mm with 
+		   | None -> raise (Solver_error "Could not find M's value in solver!") 
+		   | Some s -> s) in 
+       let mv = Z3.ast_to_string ctx mval in
+       let ov = Z3.ast_to_string ctx oval in
+       let mv = get_values mv in
+       let ov = get_values ov in
+       if mv < ov then
+	 (* Update ast and call this thing again *)
+	 let nv = mv -. 1.0 in
+	 let nval = (Z3.mk_numeral ctx (string_of_float nv) (Z3.mk_real_sort ctx)) in
+	 let ast = sub nval oval ast ctx in
+	 let () = IFDEF TDEBUG THEN print_endline ((string_of_float mv) ^ " " ^ (string_of_float ov)) ELSE () ENDIF in
+	 find_optimal nval solver ctx ast model (Z3.model_to_string ctx (Z3.solver_get_model ctx solver))
+       else
+	 let () = if model then Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline else () in
+	 print_endline ("OPTIMAL M: " ^ (string_of_float mv))
+    | Z3.L_UNDEF -> 
+       raise (Solver_error (Z3.solver_get_reason_unknown ctx solver))
+  with
+  | Z3.Error(_,Z3.OK) -> print_endline "OK"
+  | Z3.Error(_,Z3.EXCEPTION) -> print_endline "EXCEPTION"
+  | Z3.Error(_,Z3.IOB) -> print_endline "IOB"
+  | Z3.Error(_,Z3.INVALID_ARG) -> print_endline "INVALID_ARG"
+  | Z3.Error(_,Z3.PARSER_ERROR) -> print_endline "PARSER_ERROR"
+  | Z3.Error(_,Z3.INVALID_PATTERN) -> print_endline "INVALID_PATTERN"
+  | Z3.Error(_,Z3.MEMOUT_FAIL) -> print_endline "MEMOUT_FAIL"
+  | Z3.Error(_,Z3.FILE_ACCESS_ERROR) -> print_endline "FILE_ACCESS_ERROR"
+  | Z3.Error(_,Z3.INTERNAL_FATAL) -> print_endline "INTERNAL_FATAL"
+  | Z3.Error(_,Z3.INVALID_USAGE) -> 
+     let () = if model then mmodel |> print_endline else () in
+     print_endline ("OPTIMAL M: " ^ (string_of_float (get_values (Z3.ast_to_string ctx oval))))
+  | Z3.Error(_,Z3.DEC_REF_ERROR) -> print_endline "DEC_REF_ERROR"
 in
 
 try
@@ -210,7 +236,9 @@ try
 		    |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with | Some x -> x | _ -> raise Internal_error) in
   let hack21 = L.map (fun en -> "(>= M (+ Node_" ^en^" "^(H.find weighttbl en |> L.hd)^")) " |> text) finals |> (L.fold_left append empty) in
   let hack2 = append (append ("(assert (and " |> text) hack21) ("))\n" |> text)  in
-  let mb = "(assert (< M "^seqt^"))\n" |> text in
+  let mb = 
+    if !processors > 1 then "(assert (< M "^seqt^"))\n" |> text 
+    else "(assert (<= M "^seqt^"))\n" |> text in
   let tot = append ea_doc o_doc |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
 	    |> append dnpc_doc |> append declared_node_doc |> append top in
   (* This prints it to screen  *)
@@ -223,7 +251,7 @@ try
   let ast = Z3.parse_smtlib2_string ctx tot [||] [||] [||] [||] in
   let () = IFDEF TDEBUG THEN print_endline (Z3.ast_to_string ctx ast) ELSE () ENDIF in 
   let solver = Z3.mk_solver_for_logic ctx (Z3.mk_string_symbol ctx "QF_LRA") in
-  let () = find_optimal (Z3.mk_numeral ctx seqt (Z3.mk_real_sort ctx)) solver ctx ast !model in
+  let () = find_optimal (Z3.mk_numeral ctx seqt (Z3.mk_real_sort ctx)) solver ctx ast !model "" in
   Z3.del_context ctx
 with
 | End_of_file -> exit 0

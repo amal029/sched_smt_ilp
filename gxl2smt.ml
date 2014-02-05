@@ -23,12 +23,12 @@ let build_comm_cond procs s t =
 let build_order_cond procs s t =
   LL.init procs (fun x -> LL.init procs (fun y -> if x = y then "(and Node_"^s^"_"^(string_of_int y) ^ " Node_"^t^"_"^(string_of_int x)^")" else "")) |> LL.concat in
 
-let output_graph name graph_attrs = 
-  (* These are the nodes from the allocation *)
-  (* let graph_elements =  *)
-  let graph = GXL.gxl_graph_make ~role:None ~edgeids:None ~hypergraph:None ~edgemode:GXL.Directed ~gxl_type:None ~attrs:graph_attrs 
-				 ~elements:[] ~id:name in
-  {GXL.graphs=[graph];GXL.xlink="http://www.w3.org/1999/xlink"} in
+(* let output_graph name graph_attrs =  *)
+(*   (\* These are the nodes from the allocation *\) *)
+(*   (\* let graph_elements =  *\) *)
+(*   let graph = GXL.gxl_graph_make ~role:None ~edgeids:None ~hypergraph:None ~edgemode:GXL.Directed ~gxl_type:None ~attrs:graph_attrs  *)
+(* 				 ~elements:[] ~id:name in *)
+(*   {GXL.graphs=[graph];GXL.xlink="http://www.w3.org/1999/xlink"} in *)
 
 let get_graph_init_and_final_nodes graph_nodes graph_edges =
   let dests = ref [] in
@@ -131,7 +131,7 @@ try
   let file_name = ref "" in
   let processors = ref 1 in
   let model = ref false in
-  let output = ref "" in
+  (* let output = ref "" in *)
   let timeout = ref 0 in
   let red = ref 1.0 in
   let debug = ref false in
@@ -251,7 +251,7 @@ try
   let () = IFDEF TDEBUG THEN print tot ELSE () ENDIF in
   let sb = Buffer.create 1000 in
   let out = Buffer.add_string sb  in
-  let tot = print ~output:out tot in
+  (* let tot = print ~output:out tot in *)
   let tot = Buffer.contents sb in
   let ctx = Z3.mk_context [("MODEL_VALIDATE", "true");("MODEL", "true")] in
   let ast = Z3.parse_smtlib2_string ctx tot [||] [||] [||] [||] in

@@ -17,6 +17,10 @@ let (|>) x f = f x in
 let weighttbl = H.create 60 in
 let usage_msg = "Usage: gxl2smt <filename>\nsee -help for more options" in
 
+
+let lower_bound = ref 0.0 in
+let upper_bound = ref 0.0 in
+
 let build_comm_cond procs s t = 
   LL.init procs (fun x -> LL.init procs (fun y -> if x <> y then "(and Node_"^s^"_"^(string_of_int y) ^ " Node_"^t^"_"^(string_of_int x)^")" else "")) |> LL.concat in
 
@@ -67,12 +71,29 @@ let reach s t closure =
   let (_,x) = LL.find (function (x,_) -> x = s) closure in
   LL.exists (fun x -> x = t) x in
 
-let sub mval oval ast ctx = 
+let add_lower mval ctx = 
   (* First update the Mvalue term with the new argument mval *)
   let m = Z3.mk_app ctx (Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx)) [||] in
-  let f = [| Z3.mk_le ctx m oval |] in
-  let t = [| Z3.mk_lt ctx m mval |] in
-  let ast = Z3.substitute ctx ast f t in
+  Z3.mk_ge ctx m mval
+in
+
+let move_lower mval oval ast ctx = 
+  (* First update the Mvalue term with the new argument mval *)
+  let m = Z3.mk_app ctx (Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx)) [||] in
+  let f = [| Z3.mk_ge ctx m oval |] in
+  let t = [| Z3.mk_ge ctx m mval |] in
+  Z3.substitute ctx ast f t
+in
+
+let add_upper mval ctx = 
+  (* First update the Mvalue term with the new argument mval *)
+  let m = Z3.mk_app ctx (Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx)) [||] in
+  Z3.mk_lt ctx m mval 
+in
+
+let move_upper mval oval ast ctx = 
+  (* First update the Mvalue term with the new argument mval *)
+  let m = Z3.mk_app ctx (Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx)) [||] in
   let f = [| Z3.mk_lt ctx m oval |] in
   let t = [| Z3.mk_lt ctx m mval |] in
   Z3.substitute ctx ast f t
@@ -85,11 +106,40 @@ let get_values mv =
   else (float_of_string mv)
 in
 
-let rec find_optimal debug red oval solver ctx ast model mmodel = 
+let rec find_optimal debug oval solver ctx ast model = 
   try
-    let () = Z3.solver_assert ctx solver ast in
-    match Z3.solver_check ctx solver with
-    | Z3.L_FALSE -> Z3.ast_to_string ctx (Z3.solver_get_proof ctx solver) |> print_endline
+    let vv = Z3.solver_check ctx solver in
+    (* let () = IFDEF DEBUG THEN print_endline (Z3.ast_vector_to_string ctx (Z3.solver_get_assertions ctx solver)) ELSE () ENDIF in  *)
+    match vv with
+    | Z3.L_FALSE -> 
+       if ((int_of_float !lower_bound) = (int_of_float !upper_bound)) then
+       	 (* let mmodel = Z3.solver_get_model ctx solver in *)
+       	 (* let () = if model then (Z3.model_to_string ctx mmodel) |> print_endline else () in *)
+       	 print_endline ("Optimal M with reduce: " ^ (string_of_float (!lower_bound) ^ "," ^ (string_of_float 1.0)))
+       else
+	 let ov = Z3.ast_to_string ctx oval in
+	 let ov = get_values ov in
+	 let min = !lower_bound in
+	 lower_bound := ov;
+	 (* calculate the mid again *)
+	 let mid = !lower_bound +. ((!upper_bound -. !lower_bound)/.2.0) in
+	 (* pop to the original code *)
+	 let () = Z3.solver_pop ctx solver ((Z3.solver_get_num_scopes ctx solver)-1) in
+	 let () = IFDEF TDEBUG THEN print_endline (Z3.ast_vector_to_string ctx (Z3.solver_get_assertions ctx solver)) ELSE () ENDIF in 
+	 let midde = (Z3.mk_numeral ctx (string_of_float !lower_bound) (Z3.mk_real_sort ctx)) in
+	 let mmidde = (Z3.mk_numeral ctx (string_of_float min) (Z3.mk_real_sort ctx)) in
+	 let () = IFDEF TDEBUG THEN print_endline ((Z3.ast_to_string ctx midde) ^ " Lower bound changed froM NEW to OLD " 
+						   ^ (Z3.ast_to_string ctx mmidde)) ELSE () ENDIF in
+	 let ast = add_lower midde ctx in
+	 let () = Z3.solver_assert ctx solver ast in
+	 let () = IFDEF TDEBUG THEN print_endline (Z3.ast_vector_to_string ctx (Z3.solver_get_assertions ctx solver)) ELSE () ENDIF in 
+	 let pipi = (Z3.mk_numeral ctx (string_of_float mid) (Z3.mk_real_sort ctx)) in
+	 let ast = add_upper pipi ctx in
+	 let () = Z3.solver_assert ctx solver ast in
+	 let () = IFDEF TDEBUG THEN print_endline (Z3.ast_vector_to_string ctx (Z3.solver_get_assertions ctx solver)) ELSE () ENDIF in 
+	 let () = Z3.solver_push ctx solver in
+	 find_optimal debug pipi solver ctx ast model
+
     | Z3.L_TRUE -> 
        let mm = Z3.mk_func_decl ctx (Z3.mk_string_symbol ctx "M") [||] (Z3.mk_real_sort ctx) in
        let mval = (match Z3.model_get_const_interp ctx (Z3.solver_get_model ctx solver) mm with 
@@ -99,18 +149,33 @@ let rec find_optimal debug red oval solver ctx ast model mmodel =
        let ov = Z3.ast_to_string ctx oval in
        let mv = get_values mv in
        let ov = get_values ov in
+       let () = if debug then print_endline ((string_of_float mv) ^ " M " ^ (string_of_float ov)) else () in
+       let () = if debug then print_endline ((string_of_float !lower_bound) ^ " MLU " ^ (string_of_float !upper_bound) ^ " ") in
        if mv < ov then
 	 (* Update ast and call this thing again *)
-	 let nv = mv -. red in
-	 let nval = (Z3.mk_numeral ctx (string_of_float nv) (Z3.mk_real_sort ctx)) in
-	 let ast = sub nval oval ast ctx in
-	 let () = if debug then print_endline ((string_of_float mv) ^ " " ^ (string_of_float ov)) else () in
-	 find_optimal debug red nval solver ctx ast model (Z3.model_to_string ctx (Z3.solver_get_model ctx solver))
-       else
-	 let () = if model then Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline else () in
-	 print_endline ("Optimal M with reduce: " ^ (string_of_float mv) ^ "," ^ (string_of_float red))
+	 begin
+	   if ((int_of_float mv) - (int_of_float !lower_bound) <= 1) then
+	     (* found the solution *)
+	     let mmodel = Z3.solver_get_model ctx solver in
+	     let () = if model then (Z3.model_to_string ctx mmodel) |> print_endline else () in
+	     print_endline ("Optimal M with reduce: " ^ (string_of_float (mv) ^ "," ^ (string_of_float 1.0)))
+	   else
+	     begin
+	       upper_bound := !lower_bound +. ((!upper_bound -. !lower_bound)/.2.0);
+	       let nv = !lower_bound +. ((!upper_bound -. !lower_bound)/.2.0) in
+	       let nv = if nv <= !lower_bound then mv -. 1.0 else nv in
+	       let () = if debug then print_endline ("MID" ^ (string_of_float nv)) in
+	       let nval = (Z3.mk_numeral ctx (string_of_float nv) (Z3.mk_real_sort ctx)) in
+	       let ast = add_upper nval ctx in
+	       let () = Z3.solver_push ctx solver in
+	       let () = Z3.solver_assert ctx solver ast in
+	       find_optimal debug nval solver ctx ast model
+	     end
+	 end
+       else raise Internal_error
     | Z3.L_UNDEF -> 
-       raise (Solver_error (Z3.solver_get_reason_unknown ctx solver))
+       print_endline "UNDEF"
+       (* raise (Solver_error (Z3.solver_get_reason_unknown ctx solver)) *)
   with
   | Z3.Error(_,Z3.OK) -> print_endline "OK"
   | Z3.Error(_,Z3.EXCEPTION) -> print_endline "EXCEPTION"
@@ -121,9 +186,7 @@ let rec find_optimal debug red oval solver ctx ast model mmodel =
   | Z3.Error(_,Z3.MEMOUT_FAIL) -> print_endline "MEMOUT_FAIL"
   | Z3.Error(_,Z3.FILE_ACCESS_ERROR) -> print_endline "FILE_ACCESS_ERROR"
   | Z3.Error(_,Z3.INTERNAL_FATAL) -> print_endline "INTERNAL_FATAL"
-  | Z3.Error(_,Z3.INVALID_USAGE) -> 
-     let () = if model then mmodel |> print_endline else () in
-     print_endline ("Optimal M with reduce: " ^ (string_of_float ((get_values (Z3.ast_to_string ctx oval))+.red)) ^ "," ^ (string_of_float red))
+  | Z3.Error(_,Z3.INVALID_USAGE) -> print_endline "M INVALID_USAGE"
   | Z3.Error(_,Z3.DEC_REF_ERROR) -> print_endline "DEC_REF_ERROR"
 in
 
@@ -133,11 +196,9 @@ try
   let model = ref false in
   (* let output = ref "" in *)
   let timeout = ref 0 in
-  let red = ref 1.0 in
   let debug = ref false in
   let speclist = Arg.align [
 		     ("-processors", Arg.Set_int processors, " # of processors");
-		     ("-reduce-by", Arg.Set_float red, " the # to for optimal value relaxation");
 		     ("-debug", Arg.Set debug, " display the reduction in the optimal solution");
 		     ("-timeout", Arg.Set_int timeout, " timeout in unsigned integer (ms) [default: 0]");
 		     ("-get-alloc", Arg.Set model, " get allocation for the makespan result")
@@ -240,20 +301,23 @@ try
   let seqt = GXL.string_of_gxl_value
     (match (L.flatten graph_attrs |> L.map (fun x -> if GXL.get_attr_name x = "Total sequential time" then Some (GXL.get_attr_value x) else None) 
 		    |> L.filter (function | Some _ -> true | _ -> false) |> L.hd) with | Some x -> x | _ -> raise Internal_error) in
+  upper_bound := (float_of_string seqt);
   let hack21 = L.map (fun en -> "(>= M (+ Node_" ^en^" "^(H.find weighttbl en |> L.hd)^")) " |> text) finals |> (L.fold_left append empty) in
   let hack2 = append (append ("(assert (and " |> text) hack21) ("))\n" |> text)  in
-  let mb = 
-    if !processors > 1 then "(assert (< M "^seqt^"))\n" |> text 
-    else "(assert (<= M "^seqt^"))\n" |> text in
+  let min = (float_of_string seqt)/. (float_of_int !processors) |> string_of_float in
+  lower_bound := (float_of_string min);
+  (* let () = print_endline seqt in *)
+  let mid = !lower_bound +. ((!upper_bound -. !lower_bound)/.2.0) in
+  let mb = "(assert (>= M "^min^"))\n(assert (< M "^(string_of_float mid)^"))\n" |> text in
   let tot = append ea_doc o_doc |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
 	    |> append dnpc_doc |> append declared_node_doc |> append top in
   (* This prints it to screen  *)
   let () = IFDEF TDEBUG THEN print tot ELSE () ENDIF in
   let sb = Buffer.create 1000 in
   let out = Buffer.add_string sb  in
-  (* let tot = print ~output:out tot in *)
+  let () = print ~output:out tot in
   let tot = Buffer.contents sb in
-  let ctx = Z3.mk_context [("MODEL_VALIDATE", "true");("MODEL", "true")] in
+  let ctx = Z3.mk_context [("PROOF", "true"); ("MODEL_VALIDATE", "true");("MODEL", "true")] in
   let ast = Z3.parse_smtlib2_string ctx tot [||] [||] [||] [||] in
   let () = IFDEF TDEBUG THEN print_endline (Z3.ast_to_string ctx ast) ELSE () ENDIF in 
   let solver = Z3.mk_solver_for_logic ctx (Z3.mk_string_symbol ctx "QF_LRA") in
@@ -268,7 +332,10 @@ try
   let () = Z3.params_set_uint ctx params (Z3.mk_string_symbol ctx "arith.solver") 3 in
   let () = Z3.params_set_uint ctx params (Z3.mk_string_symbol ctx "arith.random_initial_value") 1 in
   let () = Z3.solver_set_params ctx solver params in
-  let () = find_optimal !debug !red (Z3.mk_numeral ctx seqt (Z3.mk_real_sort ctx)) solver ctx ast !model "" in
+  let () = Z3.solver_push ctx solver in
+  let () = Z3.solver_assert ctx solver ast in
+  let () = IFDEF TDEBUG THEN print_endline (Z3.ast_vector_to_string ctx (Z3.solver_get_assertions ctx solver)) ELSE () ENDIF in 
+  let () = find_optimal !debug (Z3.mk_numeral ctx (string_of_float mid) (Z3.mk_real_sort ctx)) solver ctx ast !model in
   Z3.del_context ctx
 with
 | End_of_file -> exit 0

@@ -1,4 +1,4 @@
-CC=ocamlopt -annot -ccopt -O3
+CC=ocamlopt -g -annot -ccopt -O3
 SRC1=gxl2smt.ml
 SRC2=smt2gxl.ml
 TEST=test.ml

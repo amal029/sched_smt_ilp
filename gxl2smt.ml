@@ -112,7 +112,8 @@ let rec find_optimal debug oval solver ctx ast model =
     (* let () = IFDEF DEBUG THEN print_endline (Z3.ast_vector_to_string ctx (Z3.solver_get_assertions ctx solver)) ELSE () ENDIF in  *)
     match vv with
     | Z3.L_FALSE -> 
-       if ((int_of_float !lower_bound) = (int_of_float !upper_bound)) then
+       if debug then print_endline (string_of_float (!upper_bound -. !lower_bound));
+       if (!upper_bound -. !lower_bound <= 1.0) then
        	 (* let mmodel = Z3.solver_get_model ctx solver in *)
        	 (* let () = if model then (Z3.model_to_string ctx mmodel) |> print_endline else () in *)
        	 print_endline ("Optimal M with reduce: " ^ (string_of_float (!lower_bound) ^ "," ^ (string_of_float 1.0)))

@@ -110,7 +110,8 @@ let rec find_optimal debug red oval solver ctx ast model mmodel =
 	 let () = if model then Z3.model_to_string ctx (Z3.solver_get_model ctx solver) |> print_endline else () in
 	 print_endline ("Optimal M with reduce: " ^ (string_of_float mv) ^ "," ^ (string_of_float red))
     | Z3.L_UNDEF -> 
-       raise (Solver_error (Z3.solver_get_reason_unknown ctx solver))
+       print_endline "UNDEF"
+       (* raise (Solver_error (Z3.solver_get_reason_unknown ctx solver)) *)
   with
   | Z3.Error(_,Z3.OK) -> print_endline "OK"
   | Z3.Error(_,Z3.EXCEPTION) -> print_endline "EXCEPTION"
@@ -251,7 +252,7 @@ try
   let () = IFDEF TDEBUG THEN print tot ELSE () ENDIF in
   let sb = Buffer.create 1000 in
   let out = Buffer.add_string sb  in
-  (* let tot = print ~output:out tot in *)
+  let () = print ~output:out tot in
   let tot = Buffer.contents sb in
   let ctx = Z3.mk_context [("MODEL_VALIDATE", "true");("MODEL", "true")] in
   let ast = Z3.parse_smtlib2_string ctx tot [||] [||] [||] [||] in

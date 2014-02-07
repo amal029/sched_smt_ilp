@@ -11,3 +11,6 @@
 gxl2smt
 test.ml
 smt2gxl
+binary_search
+reduce_search
+results

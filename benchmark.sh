@@ -10,11 +10,11 @@ function benchmark () {
 	for i in $1 ; do
 	    processors="2 4 8 16"
 	    for j in ${processors} ; do
-		file_name=$(echo $i | awk -F '/' '{print $2}' | awk -F '.' '{print $1}')
+		file_name=$(echo $i | awk -F '/' '{print $2}' | awk -F '.' '{print $1"."$2}')
 		search=$(echo $k | awk -F '/' '{print $2}' | awk -F '.' '{print $1}')
 		echo $k -timeout 10000 -processors $j $i
 		count=$(($count + 1))
-		sem -j4 $k -timeout 10000 -processors $j $i > ./results/$file_name.$search.$j.$count.txt
+		sem -j4 $k -timeout 10000 -processors $j $i > ./results/$file_name.$search.$j"_processors".$count.txt
 	    done
 	done
     done
@@ -27,6 +27,9 @@ RAND=`find ../ -iname 'Random*.gxl'`
 FORK=`find ../ -iname 'Fork_Node*.gxl'`
 JOIN=`find ../ -iname 'JOIN*.gxl'`
 STENCIL=`find ../ -iname 'STENCIL*.gxl'`
+INTREE=`find ../ -iname 'InTree*.gxl'`
+FORKJOIN=$(find ../ -iname 'Fork_Join*.gxl')
+OUTTREE=$(find ../ -iname 'OutTree*.gxl')
 
 # # # Do random benchmark 
 benchmark "$SERIES" "./binary_search"
@@ -50,8 +53,11 @@ benchmark "$JOIN" "./binary_search"
 benchmark "$STENCIL" "./binary_search" 
 # benchmark "$STENCIL" "./binary_search ./reduce_search"
 
-
 # # # Do random benchmark 
 benchmark "$RAND" "./binary_search"
 # benchmark "$RAND" "./binary_search ./reduce_search"
 
+
+benchmark "$INTREE" "./binary_search"
+benchmark "$OUTTREE" "./binary_search"
+benchmark "$FORKJOIN" "./binary_search"

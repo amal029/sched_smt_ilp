@@ -313,7 +313,7 @@ try
   let tot = append ea_doc o_doc |> append dnpca_doc |> append mb |> append hack2 |> append init_inits |> append hack1 
 	    |> append dnpc_doc |> append declared_node_doc |> append top in
   (* This prints it to screen  *)
-  let () = IFDEF TDEBUG THEN print tot ELSE () ENDIF in
+  let () = IFDEF DEBUG THEN print tot ELSE () ENDIF in
   let sb = Buffer.create 1000 in
   let out = Buffer.add_string sb  in
   let () = print ~output:out tot in

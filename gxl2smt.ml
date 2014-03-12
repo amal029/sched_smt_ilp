@@ -135,6 +135,8 @@ let rec find_optimal debug oval solver ctx ast model =
 	 let () = Z3.solver_assert ctx solver ast in
 	 let () = IFDEF TDEBUG THEN print_endline (Z3.ast_vector_to_string ctx (Z3.solver_get_assertions ctx solver)) ELSE () ENDIF in 
 	 let pipi = (Z3.mk_numeral ctx (string_of_float mid) (Z3.mk_real_sort ctx)) in
+	 let () = if debug then print_endline ("FALSE MID MMM" ^ (Z3.ast_to_string ctx pipi)) in
+	 let () = if debug then print_endline ("FALSE " ^ (string_of_float !lower_bound) ^ " MMMM " ^ (string_of_float !upper_bound)) in
 	 let ast = add_upper pipi ctx in
 	 let () = Z3.solver_assert ctx solver ast in
 	 let () = IFDEF TDEBUG THEN print_endline (Z3.ast_vector_to_string ctx (Z3.solver_get_assertions ctx solver)) ELSE () ENDIF in 
@@ -148,6 +150,7 @@ let rec find_optimal debug oval solver ctx ast model =
 		   | Some s -> s) in 
        let mv = Z3.ast_to_string ctx mval in
        let ov = Z3.ast_to_string ctx oval in
+       let () = if debug then print_endline ("OVAL MMM" ^ (Z3.ast_to_string ctx oval)) in
        let mv = get_values mv in
        let ov = get_values ov in
        let () = if debug then print_endline ((string_of_float mv) ^ " M " ^ (string_of_float ov)) else () in
@@ -155,7 +158,7 @@ let rec find_optimal debug oval solver ctx ast model =
        if mv < ov then
 	 (* Update ast and call this thing again *)
 	 begin
-	   if ((int_of_float mv) - (int_of_float !lower_bound) <= 1) then
+	   if (mv -. !lower_bound <= 1.0) then
 	     (* found the solution *)
 	     let mmodel = Z3.solver_get_model ctx solver in
 	     let () = if model then (Z3.model_to_string ctx mmodel) |> print_endline else () in
@@ -170,6 +173,7 @@ let rec find_optimal debug oval solver ctx ast model =
 	       let ast = add_upper nval ctx in
 	       let () = Z3.solver_push ctx solver in
 	       let () = Z3.solver_assert ctx solver ast in
+	       let () = if debug then print_endline ("MMM" ^ (Z3.ast_to_string ctx nval)) in
 	       find_optimal debug nval solver ctx ast model
 	     end
 	 end
@@ -225,7 +229,9 @@ try
     if !processors > 1 then
       let node_processor_combo = L.map (fun x -> L.init !processors (fun i -> x ^ "_" ^ (string_of_int i))) graph_nodes in 
       let dnpc_doc = (L.fold_left append empty) (L.map (fun x -> "(declare-fun " ^ x ^ " () Bool)\n") (L.flatten node_processor_combo) |> L.map text) in
-      ((L.fold_left append empty) 
+      let and_part = (L.fold_left append empty) 
+		       ((L.map (fun x -> "(assert (not (and " ^ (L.fold_left (fun y z -> z^" "^y) "" x) ^ ")))\n") node_processor_combo) |> L.map text) in
+      ((L.fold_left append and_part) 
 	((L.map (fun x -> "(assert (or " ^ (L.fold_left (fun y z -> z^" "^y) "" x) ^ "))\n") node_processor_combo) |> L.map text),dnpc_doc)
     else (empty,empty) in
   let () = IFDEF TDEBUG THEN print dnpc_doc; print dnpca_doc ELSE () ENDIF in

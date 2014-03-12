@@ -11,7 +11,7 @@ function benchmark () {
 	    for j in ${processors} ; do
 		file_name=$(echo $i | awk -F '/' '{print $2}' | awk -F '.' '{print $1}')
 		search=$(echo $k | awk -F '/' '{print $2}' | awk -F '.' '{print $1}')
-		echo $k -timeout 20000 -processors $j $i
+		echo $k -timeout 10000 -processors $j $i
 		sem -j4 $k -timeout 10000 -processors $j $i > ./results/$file_name.$search.$j.txt
 	    done
 	done

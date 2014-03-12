@@ -13,7 +13,7 @@ all: gxl2smt smt2gxl
 gxl2smt:
 	ocamlfind $(CC) -pp "camlp4o -I $(TYPECONV) -I $(SEXPLIB) -I	\
 	$(WHERELIB) pa_type_conv.cma pa_sexp_conv.cma pa_macro.cmo	\
-	pa_where.cma -DDEBUG -UTDEBUG" -o $@ -linkpkg -package		\
+	pa_where.cma -UDEBUG -UTDEBUG" -o $@ -linkpkg -package		\
 	batteries -package sexplib -package xml-light -package		\
 	gxl-light -package pretty -I $(Z3LIB) z3.cmxa -ccopt		\
 	-L$(CAMLIDL) $(SRC1)

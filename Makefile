@@ -15,7 +15,7 @@ gxl2smt:
 	$(WHERELIB) pa_type_conv.cma pa_sexp_conv.cma pa_macro.cmo	\
 	pa_where.cma -DDEBUG -UTDEBUG" -o $@ -linkpkg -package		\
 	batteries -package sexplib -package xml-light -package		\
-	gxl-light -package pretty -I $(Z3LIB) z3.cmxa -ccopt		\
+	gxl-light -package ocaml-pretty -I $(Z3LIB) z3.cmxa -ccopt		\
 	-L$(CAMLIDL) $(SRC1)
 
 smt2gxl:
@@ -23,7 +23,7 @@ smt2gxl:
 	$(WHERELIB) pa_type_conv.cma pa_sexp_conv.cma pa_macro.cmo	\
 	pa_where.cma -UDEBUG -UTDEBUG" -o $@ -linkpkg -package		\
 	batteries -package sexplib -package xml-light -package		\
-	gxl-light -package pretty $(SRC2)
+	gxl-light -package ocaml-pretty $(SRC2)
 
 clean:
 	rm -rf *.ll *.lle *.bc *.s *.dot *.grf *.part* gmon.out TAGS	\
